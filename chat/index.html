@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat for Order</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f2f5;
+        }
+        #chatContainer {
+            padding: 20px;
+            max-width: 600px;
+            margin: auto;
+            background: #fff;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .chat-header {
+            font-size: 18px;
+            font-weight: bold;
+            color: #df3056;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-box {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+            margin-bottom: 10px;
+            padding: 10px;
+        }
+        .chat-message {
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .chat-message .message {
+            background-color: #e1ffc7;
+            padding: 5px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        .chat-message .timestamp {
+            font-size: 10px;
+            color: #aaa;
+            margin-left: 5px;
+        }
+        .chat-message .rider {
+            font-weight: bold;
+            color: #df3056;
+            margin-right: 5px;
+        }
+        .chat-input {
+            width: calc(100% - 120px);
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+        .send-button {
+            width: 100px;
+            padding: 6px;
+            border: none;
+            border-radius: 4px;
+            background-color: #4CAF50;
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .send-button:hover {
+            background-color: #45a049;
+        }
+        .refresh-button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .refresh-button:hover {
+            background-color: #45a049;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 5px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div id="chatContainer">
+        <div class="chat-header">
+            <div id="orderCode">Order Code: </div>
+            <button class="refresh-button" onclick="refreshChat()">Refresh</button>
+        </div>
+        <div id="chatBox" class="chat-box"></div>
+        <textarea id="chatInput" class="chat-input" placeholder="Type your reply here..."></textarea>
+        <button class="send-button" onclick="sendReply()">Send Reply</button>
+    </div>
+
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.140.0.min.js"></script>
+    <script>
+        AWS.config.update({
+            region: 'eu-north-1',
+            credentials: new AWS.Credentials('AKIAVRUVVVUM73M5ULGL', '3CaIv7G5VbNfue6j5g7EOZwAKYPuT8c9VL40QZIx')
+        });
+
+        var dynamoDB = new AWS.DynamoDB.DocumentClient();
+        var tableName = 'date01';
+        var currentOrderDate01 = new URLSearchParams(window.location.search).get('date01'); // Get the date01 from the query string
+
+        function fetchOrderDetails() {
+            if (!currentOrderDate01) return;
+
+            const params = {
+                TableName: tableName,
+                Key: { date01: currentOrderDate01 }
+            };
+
+            dynamoDB.get(params, function(err, data) {
+                if (err) {
+                    console.error("Unable to retrieve order. Error JSON:", JSON.stringify(err, null, 2));
+                } else {
+                    const order = data.Item;
+                    if (!order) {
+                        console.error('Order not found for date01:', currentOrderDate01);
+                        return;
+                    }
+                    document.getElementById('orderCode').textContent = `Order Code: ${order.orderCode}`;
+                    updateChatBox(order.chat);
+                }
+            });
+        }
+
+        function updateChatBox(chat) {
+            const chatBox = document.getElementById('chatBox');
+            chatBox.innerHTML = '';
+            chat.forEach(msg => {
+                const chatMessage = document.createElement('div');
+                chatMessage.classList.add('chat-message');
+                chatMessage.innerHTML = `
+                    <div class="rider">Rider:</div>
+                    <div class="message">${msg.message}</div>
+                    <div class="timestamp">${msg.timestamp}</div>
+                `;
+                chatBox.appendChild(chatMessage);
+            });
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function refreshChat() {
+            fetchOrderDetails();
+        }
+
+        function sendReply() {
+            const chatInput = document.getElementById('chatInput');
+            const message = chatInput.value;
+            if (!message.trim()) return;
+            chatInput.value = '';
+
+            const timestamp = new Date().toLocaleTimeString();
+            const fullMessage = `Rider: ${message}`;
+
+            const params = {
+                TableName: tableName,
+                Key: { date01: currentOrderDate01 },
+                UpdateExpression: 'SET chat = list_append(if_not_exists(chat, :emptyList), :newChatItem)',
+                ExpressionAttributeValues: {
+                    ':newChatItem': [{
+                        message: fullMessage,
+                        timestamp: timestamp
+                    }],
+                    ':emptyList': []
+                }
+            };
+
+            dynamoDB.update(params, function(err, data) {
+                if (err) {
+                    console.error("Unable to send reply. Error JSON:", JSON.stringify(err, null, 2));
+                } else {
+                    console.log("Reply sent:", JSON.stringify(data, null, 2));
+                    // Fetch and update chat messages after sending a reply
+                    fetchOrderDetails();
+                }
+            });
+        }
+
+        fetchOrderDetails();
+    </script>
+</body>
+</html>
